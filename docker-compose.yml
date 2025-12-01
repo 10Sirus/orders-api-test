@@ -1,0 +1,57 @@
+version: '3.9'
+
+services:
+  # 1. The Database (Shared by App and Tests)
+  postgres:
+    image: postgres:15-alpine
+    container_name: orders-api-postgres
+    environment:
+      POSTGRES_USER: orders_user
+      POSTGRES_PASSWORD: orders_pass
+      POSTGRES_DB: orders_db
+    ports:
+      - "5433:5432" # Host port 5433 -> Container port 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders_user -d orders_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. The Application (FastAPI)
+  api:
+    build: .
+    container_name: orders-api
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orders_user:orders_pass@postgres:5432/orders_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  # 3. The Test Runner
+  tests:
+    build: .
+    container_name: orders-api-tests
+   
+    volumes:
+      - .:/app
+   
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://orders_user:orders_pass@postgres:5432/postgres
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    command: pytest -v
+
+volumes:
+  postgres_data:
